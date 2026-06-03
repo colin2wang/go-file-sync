@@ -1,0 +1,38 @@
+# General configuration for go-file-sync
+# This file defines global/default settings.
+# Per-task configurations are in the ./conf/ directory.
+
+log:
+  level: info                # debug | info | warn | error
+  output: console            # console | file | both
+  file:                      # only used when output is file or both
+    path: ./logs/sync.log
+    max_size: 100            # MB
+    max_backups: 7
+    compress: true
+
+watch:
+  debounce: 500              # Debounce wait time in milliseconds
+  interval: 100              # Poll interval in milliseconds (for polling mode)
+  workers: 0                 # 0 = one watcher goroutine per task
+
+sync:
+  mode: incremental          # full | incremental
+  workers: 4                 # Number of syncer worker goroutines (0 = CPU count)
+  backup: true               # Backup target files before overwriting
+  verify: true               # Verify file hashes after copy
+  exclude:                   # Global exclude patterns
+    - "*.tmp"
+    - "*.log"
+    - ".git/"
+    - "node_modules/"
+    - ".DS_Store"
+    - "*.swp"
+  include: []                # Global include patterns (empty = include all)
+
+shutdown:
+  timeout: 30                # Graceful shutdown timeout in seconds
+
+conf:
+  dir: ./conf                # Directory containing .conf task files
+  entry: sync.conf           # Entry conf file

@@ -1,0 +1,25 @@
+# Binaries
+build/
+*.exe
+*.exe~
+
+# Log files
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependencies
+vendor/
+
+# Build cache
+go.work
+go.work.sum
