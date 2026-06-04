@@ -13,6 +13,7 @@ import (
 var (
 	cfgFile string
 	verbose bool
+	dryRun  bool
 )
 
 // rootCmd represents the base command.
@@ -24,7 +25,8 @@ and automatically syncs them to target locations. It supports:
   - Concurrent file watching with goroutines
   - Nested conf file configuration with inheritance
   - Debouncing and filtering of events
-  - Parallel sync with worker pool`,
+  - Parallel sync with worker pool
+  - Web dashboard, metrics, triggers, and more`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, err := core.New(cfgFile)
 		if err != nil {
@@ -45,23 +47,42 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "sync.yaml", "Path to config file (sync.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
+	rootCmd.PersistentFlags().BoolVarP(&dryRun, "dry-run", "n", false, "Show what would be synced without doing it")
 
 	// Subcommands
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(checkCmd)
+	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 
 // runCmd starts the sync engine.
 var runCmd = &cobra.Command{
 	Use:   "run",
-	Short: "Start the file sync engine",
+	Short: "Start the file sync engine (continuous watching)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, err := core.New(cfgFile)
 		if err != nil {
 			return fmt.Errorf("initialize: %w", err)
 		}
+		if dryRun {
+			app.SetDryRun(true)
+		}
 		return app.Run()
+	},
+}
+
+// syncCmd performs a one-shot sync and exits.
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync all files once and exit (no continuous watching)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		app, err := core.New(cfgFile)
+		if err != nil {
+			return fmt.Errorf("initialize: %w", err)
+		}
+		return app.RunOnce()
 	},
 }
 
@@ -81,11 +102,26 @@ var checkCmd = &cobra.Command{
 	},
 }
 
+// statusCmd displays sync status and metrics.
+var statusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Display sync status and metrics",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		app, err := core.New(cfgFile)
+		if err != nil {
+			return fmt.Errorf("initialize: %w", err)
+		}
+		defer app.Close()
+		fmt.Print(app.MetricsReport())
+		return nil
+	},
+}
+
 // versionCmd prints the version.
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version number",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("go-file-sync v0.1.0")
+		fmt.Println("go-file-sync v0.3.0")
 	},
 }

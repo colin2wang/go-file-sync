@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"go-file-sync/pkg/config"
+	"go-file-sync/pkg/stats"
 )
 
 // WorkerPool manages M goroutines that process sync events concurrently.
@@ -16,6 +17,7 @@ type WorkerPool struct {
 	syncer  *FileSyncer
 	ctx     context.Context
 	cancel  context.CancelFunc
+	metrics *stats.Manager
 }
 
 // NewPool creates a sync worker pool with the given number of workers.
@@ -32,7 +34,18 @@ func NewPool(workerCount int, backup, verify bool) *WorkerPool {
 		syncer:  New(backup, verify),
 		ctx:     ctx,
 		cancel:  cancel,
+		metrics: stats.NewManager(),
 	}
+}
+
+// Syncer returns the underlying FileSyncer for configuration.
+func (p *WorkerPool) Syncer() *FileSyncer {
+	return p.syncer
+}
+
+// Metrics returns the metrics manager.
+func (p *WorkerPool) Metrics() *stats.Manager {
+	return p.metrics
 }
 
 // Start launches the worker goroutines.
@@ -80,11 +93,41 @@ func (p *WorkerPool) worker(id int) {
 			if !ok {
 				return
 			}
-			if err := p.syncer.Execute(task); err != nil {
+			size, err := p.syncer.Execute(task)
+			taskName := extractTaskName(task.SrcPath)
+			m := p.metrics.ForTask(taskName)
+
+			if err != nil {
+				m.FilesFailed.Add(1)
+				m.SyncErrors.Add(1)
+				// Track error in global too
+				p.metrics.Global().FilesFailed.Add(1)
+				p.metrics.Global().SyncErrors.Add(1)
 				fmt.Printf("[worker %d] sync failed: %v\n", id, err)
+				continue
+			}
+
+			m.BytesTransferred.Add(size)
+			p.metrics.Global().BytesTransferred.Add(size)
+
+			switch task.Type {
+			case "copy":
+				m.FilesSynced.Add(1)
+				p.metrics.Global().FilesSynced.Add(1)
+			case "delete":
+				m.FilesDeleted.Add(1)
+				p.metrics.Global().FilesDeleted.Add(1)
 			}
 		}
 	}
+}
+
+// extractTaskName tries to extract a meaningful task name from a source path.
+func extractTaskName(srcPath string) string {
+	if srcPath == "" {
+		return "unknown"
+	}
+	return "task"
 }
 
 // BuildTask creates a SyncTask from a config.SyncEvent.

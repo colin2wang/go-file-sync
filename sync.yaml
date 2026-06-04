@@ -1,38 +1,61 @@
-# General configuration for go-file-sync
-# This file defines global/default settings.
-# Per-task configurations are in the ./conf/ directory.
+# go-file-sync configuration file
+# Global settings applied to all tasks.
 
 log:
-  level: info                # debug | info | warn | error
-  output: console            # console | file | both
-  file:                      # only used when output is file or both
+  level: info
+  output: console
+  file:
     path: ./logs/sync.log
-    max_size: 100            # MB
+    max_size: 100
     max_backups: 7
     compress: true
 
 watch:
-  debounce: 500              # Debounce wait time in milliseconds
-  interval: 100              # Poll interval in milliseconds (for polling mode)
-  workers: 0                 # 0 = one watcher goroutine per task
+  debounce: 500
+  interval: 100
+  workers: 0
+  hot_reload: false
 
 sync:
-  mode: incremental          # full | incremental
-  workers: 4                 # Number of syncer worker goroutines (0 = CPU count)
-  backup: true               # Backup target files before overwriting
-  verify: true               # Verify file hashes after copy
-  exclude:                   # Global exclude patterns
+  mode: incremental
+  workers: 4
+  backup: true
+  verify: true
+  preserve_permissions: false
+  preserve_owner: false
+  preserve_timestamps: false
+  symlinks: "follow"
+  bandwidth_limit: 0
+  conflict_detection: false
+  conflict_resolution: "warn"
+  exclude:
     - "*.tmp"
     - "*.log"
     - ".git/"
     - "node_modules/"
     - ".DS_Store"
     - "*.swp"
-  include: []                # Global include patterns (empty = include all)
-
-shutdown:
-  timeout: 30                # Graceful shutdown timeout in seconds
+  include: []
+  encryption:
+    enabled: false
+    algorithm: "aes-256-gcm"
+    key_file: ""
+    key_env: ""
 
 conf:
-  dir: ./conf                # Directory containing .conf task files
-  entry: sync.conf           # Entry conf file
+  dir: ./conf
+  entry:
+    - sync.conf
+
+history:
+  enabled: false
+  path: ./sync-history.jsonl
+  max_entries: 10000
+
+web:
+  enabled: false
+  listen: ":8080"
+  dashboard: false
+
+shutdown:
+  timeout: 30

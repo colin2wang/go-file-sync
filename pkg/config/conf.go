@@ -207,6 +207,13 @@ func LoadConf(path string) (*TaskConfig, error) {
 	if tgt, err := p.getString("task", "target"); err == nil {
 		task.Task.Target = tgt
 	}
+	// Support sources/targets as multi-value lists
+	if srcs, err := p.getStringSlice("task", "sources"); err == nil {
+		task.Task.Sources = srcs
+	}
+	if tgts, err := p.getStringSlice("task", "targets"); err == nil {
+		task.Task.Targets = tgts
+	}
 	if mode, err := p.getString("task", "mode"); err == nil {
 		task.Task.Mode = mode
 	}
@@ -219,6 +226,12 @@ func LoadConf(path string) (*TaskConfig, error) {
 	if del, err := p.getBool("task", "delete_orphans"); err == nil {
 		task.Task.DeleteOrphans = del
 	}
+	if sym, err := p.getString("task", "symlinks"); err == nil {
+		task.Task.Symlinks = sym
+	}
+	if sched, err := p.getString("task", "schedule"); err == nil {
+		task.Task.Schedule = sched
+	}
 
 	// Parse [watch] section
 	if rec, err := p.getBool("watch", "recursive"); err == nil {
@@ -229,6 +242,20 @@ func LoadConf(path string) (*TaskConfig, error) {
 	}
 	if deb, err := p.getInt("watch", "debounce"); err == nil {
 		task.Watch.Debounce = deb
+	}
+
+	// Parse [trigger] section
+	if onSync, err := p.getString("trigger", "on_sync"); err == nil {
+		task.Trigger.OnSync = onSync
+	}
+	if onComplete, err := p.getString("trigger", "on_complete"); err == nil {
+		task.Trigger.OnComplete = onComplete
+	}
+	if onError, err := p.getString("trigger", "on_error"); err == nil {
+		task.Trigger.OnError = onError
+	}
+	if timeout, err := p.getInt("trigger", "timeout"); err == nil {
+		task.Trigger.Timeout = timeout
 	}
 
 	// Parse [inherit] section
