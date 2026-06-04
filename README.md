@@ -49,7 +49,7 @@ A lightweight file and directory auto-sync tool written in Go. It watches specif
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/go-file-sync.git
+git clone https://github.com/colin2wang/go-file-sync.git
 cd go-file-sync
 make build
 ```
@@ -57,7 +57,7 @@ make build
 ### Using go install
 
 ```bash
-go install github.com/yourusername/go-file-sync@latest
+go install github.com/colin2wang/go-file-sync@latest
 ```
 
 ## Quick Start

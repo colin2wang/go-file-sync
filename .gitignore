@@ -23,3 +23,6 @@ vendor/
 # Build cache
 go.work
 go.work.sum
+
+# AI Code Tools
+.atomcode/
