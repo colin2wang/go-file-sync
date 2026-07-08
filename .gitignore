@@ -17,6 +17,13 @@ Thumbs.db
 *.swp
 *.swo
 
+# Frontend
+web/node_modules/
+pkg/web/dist/
+
+# Dist
+dist/
+
 # Dependencies
 vendor/
 
@@ -26,3 +33,4 @@ go.work.sum
 
 # AI Code Tools
 .atomcode/
+.mimocode/

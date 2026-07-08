@@ -1,29 +1,25 @@
-.PHONY: build run clean test lint
+.PHONY: build build-web clean test lint
 
 # Variables
 BINARY_NAME=go-file-sync
-BUILD_DIR=build
+BUILD_DIR=dist
 GO_FLAGS=-ldflags="-s -w"
 
 # Default target
 all: build
 
-build:
+build-web:
+	@echo "Building Vue3 frontend..."
+	@if [ -d web ]; then \
+		cd web && pnpm install && pnpm run build; \
+	else \
+		echo "web/ directory not found, skipping frontend build"; \
+	fi
+
+build: build-web
 	@echo "Building $(BINARY_NAME)..."
-	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(GO_FLAGS) .
-	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
-
-run:
-	@echo "Starting $(BINARY_NAME)..."
-	go run . run
-
-run-config:
-	@echo "Starting $(BINARY_NAME) with custom config..."
-	go run . run --config $(CONFIG)
-
-check:
-	@echo "Checking configuration..."
-	go run . check --config $(CONFIG)
+	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(GO_FLAGS) .
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe"
 
 test:
 	@echo "Running tests..."
@@ -48,26 +44,27 @@ install:
 	go install .
 
 # Cross compilation
-build-linux:
+build-linux: build-web
 	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(GO_FLAGS) .
 
-build-darwin:
+build-darwin: build-web
 	GOOS=darwin GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 $(GO_FLAGS) .
 
-build-windows:
+build-windows: build-web
 	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(GO_FLAGS) .
 
-build-all: build-linux build-darwin build-windows
+build-all: build-web
+	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(GO_FLAGS) .
+	GOOS=darwin GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 $(GO_FLAGS) .
+	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(GO_FLAGS) .
 	@echo "All builds complete"
 
 help:
 	@echo "Usage: make <target>"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build          Build the binary"
-	@echo "  run            Run the application"
-	@echo "  run-config     Run with custom CONFIG=path"
-	@echo "  check          Validate configuration (CONFIG=path)"
+	@echo "  build          Build the binary (includes frontend)"
+	@echo "  build-web      Build only the Vue3 frontend"
 	@echo "  test           Run all tests"
 	@echo "  lint           Run linters"
 	@echo "  clean          Remove build artifacts"
