@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"go-file-sync/pkg/configdb"
+	"go-file-sync/pkg/syncmanager"
 	"go-file-sync/pkg/web"
 )
 
@@ -31,8 +32,17 @@ func main() {
 	}
 	defer db.Close()
 
+	// Create sync manager
+	syncMgr := syncmanager.NewManager(db)
+	syncMgr.Start()
+	defer syncMgr.Stop()
+
 	// Create API handler
 	api := web.NewAPI(db)
+	api.SetTaskUpdateFunc(func(taskID int64, enabled bool) {
+		syncMgr.TaskUpdated(taskID, enabled)
+	})
+	api.SetSyncManager(syncMgr)
 
 	// Create HTTP mux
 	mux := http.NewServeMux()

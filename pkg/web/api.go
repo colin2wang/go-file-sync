@@ -7,14 +7,27 @@ import (
 	"strings"
 
 	"go-file-sync/pkg/configdb"
+	"go-file-sync/pkg/syncmanager"
 )
 
+type TaskUpdateFunc func(taskID int64, enabled bool)
+
 type API struct {
-	db *configdb.ConfigDB
+	db           *configdb.ConfigDB
+	onTaskUpdate TaskUpdateFunc
+	syncMgr      *syncmanager.Manager
 }
 
 func NewAPI(db *configdb.ConfigDB) *API {
 	return &API{db: db}
+}
+
+func (a *API) SetTaskUpdateFunc(fn TaskUpdateFunc) {
+	a.onTaskUpdate = fn
+}
+
+func (a *API) SetSyncManager(mgr *syncmanager.Manager) {
+	a.syncMgr = mgr
 }
 
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
@@ -23,6 +36,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/logs", a.handleLogs)
 	mux.HandleFunc("/api/logs/", a.handleLogsByTask)
 	mux.HandleFunc("/api/stats", a.handleStats)
+	mux.HandleFunc("/api/sync-stats", a.handleSyncStats)
 }
 
 func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +83,9 @@ func (a *API) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.ID = id
+	if a.onTaskUpdate != nil {
+		a.onTaskUpdate(id, t.Enabled)
+	}
 	writeJSON(w, t)
 }
 
@@ -99,12 +116,18 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if a.onTaskUpdate != nil {
+			a.onTaskUpdate(id, t.Enabled)
+		}
 		writeJSON(w, map[string]string{"status": "updated"})
 
 	case http.MethodDelete:
 		if err := a.db.DeleteTask(id); err != nil {
 			writeErrorJSON(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if a.onTaskUpdate != nil {
+			a.onTaskUpdate(id, false)
 		}
 		writeJSON(w, map[string]string{"status": "deleted"})
 
@@ -188,4 +211,22 @@ func writeErrorJSON(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func (a *API) handleSyncStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErrorJSON(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if a.syncMgr == nil {
+		writeJSON(w, map[string]interface{}{
+			"monitored_files": 0,
+			"synced_files":    0,
+		})
+		return
+	}
+
+	stats := a.syncMgr.GetStats()
+	writeJSON(w, stats)
 }

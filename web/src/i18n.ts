@@ -29,7 +29,9 @@ const messages = {
       totalTasks: '任务总数',
       enabledTasks: '启用任务',
       successCount: '成功次数',
-      failCount: '失败次数'
+      failCount: '失败次数',
+      monitoredFiles: '监控文件',
+      syncedFiles: '同步文件'
     }
   },
   en: {
@@ -62,7 +64,9 @@ const messages = {
       totalTasks: 'Total Tasks',
       enabledTasks: 'Enabled',
       successCount: 'Success',
-      failCount: 'Failed'
+      failCount: 'Failed',
+      monitoredFiles: 'Monitored',
+      syncedFiles: 'Synced'
     }
   },
   ja: {
@@ -95,7 +99,9 @@ const messages = {
       totalTasks: 'タスク数',
       enabledTasks: '有効',
       successCount: '成功',
-      failCount: '失敗'
+      failCount: '失敗',
+      monitoredFiles: '監視中',
+      syncedFiles: '同期済み'
     }
   }
 }

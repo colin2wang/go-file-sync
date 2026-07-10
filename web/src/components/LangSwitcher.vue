@@ -1,7 +1,7 @@
 <template>
   <div class="lang-switcher">
-    <button 
-      v-for="lang in languages" 
+    <button
+      v-for="lang in languages"
       :key="lang.code"
       :class="{ active: currentLang === lang.code }"
       @click="setLang(lang.code)"
@@ -12,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, provide } from 'vue'
+import { inject } from 'vue'
 
 const languages = [
   { code: 'zh', label: '中文' },
@@ -20,14 +20,12 @@ const languages = [
   { code: 'ja', label: '日本語' }
 ]
 
-const currentLang = ref(localStorage.getItem('lang') || 'zh')
+const currentLang = inject<import('vue').Ref<string>>('lang')!
 
 function setLang(code: string) {
   currentLang.value = code
   localStorage.setItem('lang', code)
 }
-
-provide('lang', currentLang)
 </script>
 
 <style scoped>

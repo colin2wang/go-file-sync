@@ -7,6 +7,8 @@
           <span class="stat">{{ t.stats.totalTasks }}: {{ tasks.length }}</span>
           <span class="stat success">{{ t.stats.successCount }}: {{ stats.success_count || 0 }}</span>
           <span class="stat error">{{ t.stats.failCount }}: {{ stats.fail_count || 0 }}</span>
+          <span class="stat info">{{ t.stats.monitoredFiles || '监控文件' }}: {{ syncStats.monitored_files }}</span>
+          <span class="stat success">{{ t.stats.syncedFiles || '同步文件' }}: {{ syncStats.synced_files }}</span>
         </div>
         <LangSwitcher />
       </div>
@@ -64,7 +66,7 @@
             <span class="log-time">{{ formatTime(log.created_at) }}</span>
             <span class="log-action">{{ log.action }}</span>
             <span class="log-file">{{ log.file_path }}</span>
-            <span class="log-status" :class="log.status">{{ log.status === 'success' ? t.synced : t.failed }}</span>
+            <span class="log-status" :class="log.status">{{ (log.status === 'success' || log.status === 'synced') ? t.synced : t.failed }}</span>
           </div>
           <div v-if="logs.length === 0" class="empty-state">
             {{ t.noLogs }}
@@ -126,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, inject } from 'vue'
+import { ref, onMounted, watch, provide } from 'vue'
 import messages from './i18n'
 import LangSwitcher from './components/LangSwitcher.vue'
 import FileBrowser from './components/FileBrowser.vue'
@@ -157,16 +159,24 @@ interface Stats {
   fail_count: number
 }
 
-const lang = inject<any>('lang')
+const currentLang = ref(localStorage.getItem('lang') || 'zh')
 const t = ref(messages.zh)
 
-watch(lang, (val) => {
+// Initialize translations
+t.value = messages[currentLang.value] || messages.zh
+
+// Watch for language changes
+watch(currentLang, (val) => {
   t.value = messages[val] || messages.zh
-}, { immediate: true })
+})
+
+// Provide language state to child components
+provide('lang', currentLang)
 
 const tasks = ref<SyncTask[]>([])
 const logs = ref<SyncLog[]>([])
 const stats = ref<Stats>({ total_tasks: 0, enabled_tasks: 0, success_count: 0, fail_count: 0 })
+const syncStats = ref<{ monitored_files: number; synced_files: number }>({ monitored_files: 0, synced_files: 0 })
 const showAddTask = ref(false)
 const editingTask = ref<SyncTask | null>(null)
 const showBrowser = ref(false)
@@ -202,6 +212,12 @@ async function loadStats() {
   const res = await fetch('/api/stats')
   const data = await safeJson(res)
   stats.value = data || { total_tasks: 0, enabled_tasks: 0, success_count: 0, fail_count: 0 }
+}
+
+async function loadSyncStats() {
+  const res = await fetch('/api/sync-stats')
+  const data = await safeJson(res)
+  syncStats.value = data || { monitored_files: 0, synced_files: 0 }
 }
 
 async function saveTask() {
@@ -293,7 +309,10 @@ onMounted(() => {
   loadTasks()
   loadLogs()
   loadStats()
-  setInterval(loadLogs, 5000)
+  loadSyncStats()
+  setInterval(loadLogs, 60000) // Refresh logs every 60 seconds
+  setInterval(loadStats, 60000) // Refresh stats every 60 seconds
+  setInterval(loadSyncStats, 60000) // Refresh sync stats every 60 seconds
 })
 </script>
 
@@ -347,6 +366,7 @@ body {
 
 .stat.success { color: #00c853; }
 .stat.error { color: #ff5252; }
+.stat.info { color: #1da1f2; }
 
 .main {
   display: grid;
