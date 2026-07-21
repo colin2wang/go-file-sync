@@ -1,4 +1,4 @@
-.PHONY: build build-web clean test lint
+.PHONY: build build-web clean test lint verify
 
 # Variables
 BINARY_NAME=go-file-sync
@@ -8,6 +8,11 @@ GO_FLAGS=-ldflags="-s -w"
 # Default target
 all: build
 
+# Compile check for the whole module (catches packages that don't build).
+verify:
+	@echo "Verifying build of all packages..."
+	go build ./...
+
 build-web:
 	@echo "Building Vue3 frontend..."
 	@if [ -d web ]; then \
@@ -16,7 +21,7 @@ build-web:
 		echo "web/ directory not found, skipping frontend build"; \
 	fi
 
-build: build-web
+build: build-web verify
 	@echo "Building $(BINARY_NAME)..."
 	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(GO_FLAGS) .
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe"

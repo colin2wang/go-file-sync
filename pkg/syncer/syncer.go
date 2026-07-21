@@ -6,7 +6,6 @@ package syncer
 
 import (
 	"fmt"
-	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
@@ -22,6 +21,12 @@ type SyncTask struct {
 	NewPath string // Used for rename
 	IsDir   bool
 	Size    int64
+
+	// TaskID/TaskName identify the owning task (for logging and metrics).
+	TaskID   int64
+	TaskName string
+	// RelPath is the path relative to the watched root (for human-readable logs).
+	RelPath string
 }
 
 // FileSyncer handles actual file system operations.
@@ -131,6 +136,24 @@ func (s *FileSyncer) copyFile(src, dst string) (int64, error) {
 		return 0, fmt.Errorf("create target dir: %w", err)
 	}
 
+	// Conflict detection: if the target already exists and is newer than the
+	// source, the target was likely modified independently. Resolve per policy.
+	if s.conflictDetection {
+		if dstInfo, err := os.Stat(dst); err == nil {
+			if srcInfo, err := os.Stat(src); err == nil && dstInfo.ModTime().After(srcInfo.ModTime()) {
+				switch s.conflictResolution {
+				case "skip":
+					fmt.Printf("[syncer] conflict detected, skipping (target newer): %s\n", dst)
+					return 0, nil
+				case "warn":
+					fmt.Printf("[syncer] conflict detected, target newer, overwriting: %s\n", dst)
+				default:
+					// "overwrite"/"backup": proceed normally
+				}
+			}
+		}
+	}
+
 	// Backup existing file if enabled
 	if s.backupEnabled {
 		if _, err := os.Stat(dst); err == nil {
@@ -230,6 +253,9 @@ func (s *FileSyncer) preserveAttrs(src, dst string) {
 	if s.preservePerms {
 		os.Chmod(dst, srcInfo.Mode())
 	}
+	if s.preserveOwner {
+		_ = chownFrom(srcInfo, dst)
+	}
 	if s.preserveTimes {
 		os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
 	}
@@ -313,12 +339,4 @@ func copyFileSimple(src, dst string) error {
 
 	_, err = io.Copy(dstFile, srcFile)
 	return err
-}
-
-// RouteToWorker returns a worker index for a given file path using consistent hashing.
-// This ensures the same file always goes to the same worker for ordered processing.
-func RouteToWorker(relPath string, workerCount int) int {
-	h := fnv.New32a()
-	h.Write([]byte(relPath))
-	return int(h.Sum32()) % workerCount
 }

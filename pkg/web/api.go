@@ -186,7 +186,7 @@ func (a *API) handleStats(w http.ResponseWriter, r *http.Request) {
 	successCount := 0
 	failCount := 0
 	for _, l := range logs {
-		if l.Status == "success" {
+		if l.Status == "synced" || l.Status == "success" {
 			successCount++
 		} else if l.Status == "failed" {
 			failCount++

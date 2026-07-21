@@ -12,7 +12,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('build', 'build-web', 'test', 'lint', 'clean', 'install', 'build-linux', 'build-darwin', 'build-windows', 'build-all', 'help')]
+    [ValidateSet('build', 'build-web', 'test', 'lint', 'verify', 'clean', 'install', 'build-linux', 'build-darwin', 'build-windows', 'build-all', 'help')]
     [string]$Target = 'help'
 )
 
@@ -61,13 +61,18 @@ function Invoke-BuildWeb {
 
 function Invoke-Build {
     Invoke-BuildWeb
-    Write-Step "Building $BinaryName..."
+    Invoke-Verify
+    Write-Step "Building for Windows (amd64)..."
+    $env:GOOS = 'windows'
+    $env:GOARCH = 'amd64'
     if (-not (Test-Path $BuildDir)) {
         New-Item -ItemType Directory -Path $BuildDir | Out-Null
     }
-    go build -o "$BuildDir/$BinaryName" $GoFlags .
+    go build -o "$BuildDir/$BinaryName-windows-amd64.exe" $GoFlags .
+    Remove-Item Env:\GOOS
+    Remove-Item Env:\GOARCH
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "Build complete: $BuildDir/$BinaryName"
+        Write-Success "Build complete: $BuildDir/$BinaryName-windows-amd64.exe"
     } else {
         Write-Error "Build failed!"
         exit 1
@@ -77,6 +82,17 @@ function Invoke-Build {
 function Invoke-Test {
     Write-Step "Running tests..."
     go test ./... -v -count=1
+}
+
+function Invoke-Verify {
+    Write-Step "Verifying build of all packages..."
+    go build ./...
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Compile check passed"
+    } else {
+        Write-Error "Compile check failed!"
+        exit 1
+    }
 }
 
 function Invoke-Lint {
@@ -218,6 +234,7 @@ switch ($Target) {
     'build-web'     { Invoke-BuildWeb }
     'test'          { Invoke-Test }
     'lint'          { Invoke-Lint }
+    'verify'        { Invoke-Verify }
     'clean'         { Invoke-Clean }
     'install'       { Invoke-Install }
     'build-linux'   { Invoke-BuildLinux }

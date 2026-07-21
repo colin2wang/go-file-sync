@@ -3,8 +3,10 @@ package configdb
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -15,15 +17,24 @@ type ConfigDB struct {
 }
 
 type SyncTask struct {
-	ID              int64     `json:"id"`
-	Name            string    `json:"name"`
-	SourcePath      string    `json:"source_path"`
-	TargetPath      string    `json:"target_path"`
-	MonitorInterval int       `json:"monitor_interval"`
-	SyncDirection   string    `json:"sync_direction"`
-	Enabled         bool      `json:"enabled"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                 int64     `json:"id"`
+	Name               string    `json:"name"`
+	SourcePath         string    `json:"source_path"`
+	TargetPath         string    `json:"target_path"`
+	MonitorInterval    int       `json:"monitor_interval"`
+	SyncDirection      string    `json:"sync_direction"`
+	Enabled            bool      `json:"enabled"`
+	Backup             bool      `json:"backup"`
+	Verify             bool      `json:"verify"`
+	PreservePerms      bool      `json:"preserve_perms"`
+	PreserveOwner      bool      `json:"preserve_owner"`
+	PreserveTimes      bool      `json:"preserve_times"`
+	Symlinks           string    `json:"symlinks"`
+	BandwidthLimit     int64     `json:"bandwidth_limit"`
+	ConflictDetection  bool      `json:"conflict_detection"`
+	ConflictResolution string    `json:"conflict_resolution"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type SyncLog struct {
@@ -91,14 +102,43 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("exec %s: %w", q[:50], err)
 		}
 	}
+
+	// Add new sync-option columns to existing databases without breaking them.
+	addColumn(db, "backup", "INTEGER DEFAULT 0")
+	addColumn(db, "verify", "INTEGER DEFAULT 0")
+	addColumn(db, "preserve_perms", "INTEGER DEFAULT 0")
+	addColumn(db, "preserve_owner", "INTEGER DEFAULT 0")
+	addColumn(db, "preserve_times", "INTEGER DEFAULT 0")
+	addColumn(db, "symlinks", "TEXT DEFAULT 'follow'")
+	addColumn(db, "bandwidth_limit", "INTEGER DEFAULT 0")
+	addColumn(db, "conflict_detection", "INTEGER DEFAULT 0")
+	addColumn(db, "conflict_resolution", "TEXT DEFAULT 'warn'")
+
 	return nil
+}
+
+// addColumn adds a column if it does not already exist (idempotent migration).
+func addColumn(db *sql.DB, name, colType string) {
+	_, err := db.Exec(fmt.Sprintf("ALTER TABLE sync_tasks ADD COLUMN %s %s", name, colType))
+	if err != nil {
+		// SQLite errors with "duplicate column" when the column already exists.
+		if strings.Contains(err.Error(), "duplicate column") {
+			return
+		}
+		log.Printf("migrate: add column %s failed: %v", name, err)
+	}
 }
 
 func (c *ConfigDB) CreateTask(t *SyncTask) (int64, error) {
 	result, err := c.db.Exec(
-		`INSERT INTO sync_tasks (name, source_path, target_path, monitor_interval, sync_direction, enabled)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO sync_tasks
+			(name, source_path, target_path, monitor_interval, sync_direction, enabled,
+			 backup, verify, preserve_perms, preserve_owner, preserve_times, symlinks,
+			 bandwidth_limit, conflict_detection, conflict_resolution)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.Name, t.SourcePath, t.TargetPath, t.MonitorInterval, t.SyncDirection, t.Enabled,
+		t.Backup, t.Verify, t.PreservePerms, t.PreserveOwner, t.PreserveTimes, t.Symlinks,
+		t.BandwidthLimit, t.ConflictDetection, t.ConflictResolution,
 	)
 	if err != nil {
 		return 0, err
@@ -109,9 +149,13 @@ func (c *ConfigDB) CreateTask(t *SyncTask) (int64, error) {
 func (c *ConfigDB) GetTask(id int64) (*SyncTask, error) {
 	t := &SyncTask{}
 	err := c.db.QueryRow(
-		`SELECT id, name, source_path, target_path, monitor_interval, sync_direction, enabled, created_at, updated_at
+		`SELECT id, name, source_path, target_path, monitor_interval, sync_direction, enabled,
+			backup, verify, preserve_perms, preserve_owner, preserve_times, symlinks,
+			bandwidth_limit, conflict_detection, conflict_resolution, created_at, updated_at
 		 FROM sync_tasks WHERE id = ?`, id,
-	).Scan(&t.ID, &t.Name, &t.SourcePath, &t.TargetPath, &t.MonitorInterval, &t.SyncDirection, &t.Enabled, &t.CreatedAt, &t.UpdatedAt)
+	).Scan(&t.ID, &t.Name, &t.SourcePath, &t.TargetPath, &t.MonitorInterval, &t.SyncDirection, &t.Enabled,
+		&t.Backup, &t.Verify, &t.PreservePerms, &t.PreserveOwner, &t.PreserveTimes, &t.Symlinks,
+		&t.BandwidthLimit, &t.ConflictDetection, &t.ConflictResolution, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +164,9 @@ func (c *ConfigDB) GetTask(id int64) (*SyncTask, error) {
 
 func (c *ConfigDB) ListTasks() ([]SyncTask, error) {
 	rows, err := c.db.Query(
-		`SELECT id, name, source_path, target_path, monitor_interval, sync_direction, enabled, created_at, updated_at
+		`SELECT id, name, source_path, target_path, monitor_interval, sync_direction, enabled,
+			backup, verify, preserve_perms, preserve_owner, preserve_times, symlinks,
+			bandwidth_limit, conflict_detection, conflict_resolution, created_at, updated_at
 		 FROM sync_tasks ORDER BY id`,
 	)
 	if err != nil {
@@ -131,7 +177,9 @@ func (c *ConfigDB) ListTasks() ([]SyncTask, error) {
 	var tasks []SyncTask
 	for rows.Next() {
 		var t SyncTask
-		if err := rows.Scan(&t.ID, &t.Name, &t.SourcePath, &t.TargetPath, &t.MonitorInterval, &t.SyncDirection, &t.Enabled, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.SourcePath, &t.TargetPath, &t.MonitorInterval, &t.SyncDirection, &t.Enabled,
+			&t.Backup, &t.Verify, &t.PreservePerms, &t.PreserveOwner, &t.PreserveTimes, &t.Symlinks,
+			&t.BandwidthLimit, &t.ConflictDetection, &t.ConflictResolution, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		tasks = append(tasks, t)
@@ -141,9 +189,14 @@ func (c *ConfigDB) ListTasks() ([]SyncTask, error) {
 
 func (c *ConfigDB) UpdateTask(id int64, t *SyncTask) error {
 	_, err := c.db.Exec(
-		`UPDATE sync_tasks SET name=?, source_path=?, target_path=?, monitor_interval=?, sync_direction=?, enabled=?, updated_at=CURRENT_TIMESTAMP
+		`UPDATE sync_tasks SET
+			name=?, source_path=?, target_path=?, monitor_interval=?, sync_direction=?, enabled=?,
+			backup=?, verify=?, preserve_perms=?, preserve_owner=?, preserve_times=?, symlinks=?,
+			bandwidth_limit=?, conflict_detection=?, conflict_resolution=?, updated_at=CURRENT_TIMESTAMP
 		 WHERE id=?`,
-		t.Name, t.SourcePath, t.TargetPath, t.MonitorInterval, t.SyncDirection, t.Enabled, id,
+		t.Name, t.SourcePath, t.TargetPath, t.MonitorInterval, t.SyncDirection, t.Enabled,
+		t.Backup, t.Verify, t.PreservePerms, t.PreserveOwner, t.PreserveTimes, t.Symlinks,
+		t.BandwidthLimit, t.ConflictDetection, t.ConflictResolution, id,
 	)
 	return err
 }

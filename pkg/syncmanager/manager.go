@@ -32,6 +32,7 @@ type Manager struct {
 
 type runningTask struct {
 	task   *configdb.SyncTask
+	syncer *syncer.FileSyncer
 	cancel context.CancelFunc
 }
 
@@ -57,8 +58,9 @@ func NewManager(db *configdb.ConfigDB) *Manager {
 
 // Start starts the sync manager and all enabled tasks.
 func (m *Manager) Start() {
-	// Create worker pool
-	m.pool = syncer.NewPool(4, false, false)
+	// Create the shared worker pool and route results back to DB logging/stats.
+	m.pool = syncer.NewPool(4)
+	m.pool.SetResultHandler(m.onSyncResult)
 	m.pool.Start()
 
 	// Load and start enabled tasks
@@ -136,6 +138,20 @@ func (m *Manager) TaskUpdated(taskID int64, enabled bool) {
 	}
 }
 
+func (m *Manager) buildSyncer(task *configdb.SyncTask) *syncer.FileSyncer {
+	fs := syncer.New(task.Backup, task.Verify)
+	fs.SetPreservePermissions(task.PreservePerms)
+	fs.SetPreserveOwner(task.PreserveOwner)
+	fs.SetPreserveTimestamps(task.PreserveTimes)
+	if task.Symlinks != "" {
+		fs.SetSymlinks(task.Symlinks)
+	}
+	fs.SetBandwidthLimit(task.BandwidthLimit)
+	fs.SetConflictDetection(task.ConflictDetection)
+	fs.SetConflictResolution(task.ConflictResolution)
+	return fs
+}
+
 func (m *Manager) startTask(task *configdb.SyncTask) {
 	// Stop existing task if running
 	if rt, ok := m.tasks[task.ID]; ok {
@@ -145,6 +161,7 @@ func (m *Manager) startTask(task *configdb.SyncTask) {
 	taskCtx, taskCancel := context.WithCancel(m.ctx)
 	rt := &runningTask{
 		task:   task,
+		syncer: m.buildSyncer(task),
 		cancel: taskCancel,
 	}
 	m.tasks[task.ID] = rt
@@ -152,7 +169,7 @@ func (m *Manager) startTask(task *configdb.SyncTask) {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		m.runTaskLoop(taskCtx, task)
+		m.runTaskLoop(taskCtx, rt)
 	}()
 
 	log.Printf("Started sync task: %s (every %ds)", task.Name, task.MonitorInterval)
@@ -166,41 +183,45 @@ func (m *Manager) stopTask(taskID int64) {
 	}
 }
 
-func (m *Manager) runTaskLoop(ctx context.Context, task *configdb.SyncTask) {
-	ticker := time.NewTicker(time.Duration(task.MonitorInterval) * time.Second)
+func (m *Manager) runTaskLoop(ctx context.Context, rt *runningTask) {
+	ticker := time.NewTicker(time.Duration(rt.task.MonitorInterval) * time.Second)
 	defer ticker.Stop()
 
 	// Perform initial sync
-	m.performSync(task)
+	m.performSync(rt)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.performSync(task)
+			m.performSync(rt)
 		}
 	}
 }
 
-func (m *Manager) performSync(task *configdb.SyncTask) {
+func (m *Manager) performSync(rt *runningTask) {
+	task := rt.task
 	source := task.SourcePath
 	target := task.TargetPath
 
 	// Ensure source exists
 	sourceInfo, err := os.Stat(source)
 	if os.IsNotExist(err) {
-		m.logSync(task, "failed", source, fmt.Sprintf("Source does not exist: %s", source))
+		m.logSync(task.ID, task.Name, "failed", source, fmt.Sprintf("Source does not exist: %s", source))
 		return
 	}
 
 	// If source is a file, sync just that file
 	if !sourceInfo.IsDir() {
-		m.syncFile(task, source, target)
+		var wg sync.WaitGroup
+		m.syncFile(rt, source, target, "", &wg)
+		wg.Wait()
 		return
 	}
 
-	// If source is a directory, walk and sync all files
+	// If source is a directory, walk and sync all files concurrently via the pool.
+	var wg sync.WaitGroup
 	err = filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -219,120 +240,116 @@ func (m *Manager) performSync(task *configdb.SyncTask) {
 
 		// Determine target path
 		dstPath := filepath.Join(target, relPath)
-
-		// Ensure target directory exists
-		dstDir := filepath.Dir(dstPath)
-		if err := os.MkdirAll(dstDir, 0755); err != nil {
-			return err
-		}
-
-		// Sync the file
-		m.syncFile(task, path, dstPath)
+		m.syncFile(rt, path, dstPath, relPath, &wg)
 		return nil
 	})
 
+	wg.Wait()
+
 	if err != nil {
-		m.logSync(task, "failed", source, fmt.Sprintf("Walk error: %v", err))
+		m.logSync(task.ID, task.Name, "failed", source, fmt.Sprintf("Walk error: %v", err))
 	}
 }
 
-func (m *Manager) syncFile(task *configdb.SyncTask, srcPath, dstPath string) {
-	srcInfo, err := os.Stat(srcPath)
-	if err != nil {
-		m.logSync(task, "failed", srcPath, fmt.Sprintf("Failed to stat source: %v", err))
-		return
-	}
-
-	// Track monitored files (unique by source path)
+// syncFile resolves the actual copy direction, then submits the work to the
+// worker pool. The WaitGroup is signalled once the job has been processed.
+func (m *Manager) syncFile(rt *runningTask, srcPath, dstPath, relPath string, wg *sync.WaitGroup) {
+	// Track monitored files (unique by source path).
 	m.statsMu.Lock()
 	m.monitoredFiles[srcPath] = true
 	m.statsMu.Unlock()
 
-	// Ensure target directory exists
-	dstDir := filepath.Dir(dstPath)
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
-		m.logSync(task, "failed", srcPath, fmt.Sprintf("Failed to create target dir: %v", err))
+	wg.Add(1)
+
+	from, to, shouldSync, err := m.resolveDirection(rt.task, srcPath, dstPath)
+	if err != nil {
+		m.logSync(rt.task.ID, rt.task.Name, "failed", srcPath, err.Error())
+		wg.Done()
+		return
+	}
+	if !shouldSync {
+		wg.Done()
 		return
 	}
 
-	// Check if we need to sync based on direction
-	shouldSync := false
-	switch task.SyncDirection {
-	case "one_way_upload":
-		shouldSync = true // Always sync from source to target
-	case "one_way_download":
-		// Check if source is newer than target
-		dstInfo, err := os.Stat(dstPath)
-		if os.IsNotExist(err) {
-			shouldSync = true
-		} else if err == nil && srcInfo.ModTime().After(dstInfo.ModTime()) {
-			shouldSync = true
-		}
-	case "two_way":
-		// Sync newer file
-		dstInfo, err := os.Stat(dstPath)
-		if os.IsNotExist(err) {
-			shouldSync = true
-		} else if err == nil && srcInfo.ModTime().After(dstInfo.ModTime()) {
-			shouldSync = true
-		}
+	task := syncer.SyncTask{
+		Type:     "copy",
+		SrcPath:  from,
+		DstPath:  to,
+		IsDir:    false,
+		TaskID:   rt.task.ID,
+		TaskName: rt.task.Name,
+		RelPath:  relPath,
 	}
+	job := syncer.Job{
+		Task:   task,
+		Syncer: rt.syncer,
+		Done:   wg.Done,
+	}
+	m.pool.SubmitForPath(job, relPath)
+}
 
-	if shouldSync {
-		relPath, _ := filepath.Rel(filepath.Dir(srcPath), srcPath)
-		if err := copyFile(srcPath, dstPath); err != nil {
-			m.logSync(task, "failed", srcPath, fmt.Sprintf("Failed to copy %s: %v", relPath, err))
-		} else {
-			// Track synced files (unique by source path)
-			m.statsMu.Lock()
-			m.syncedFiles[srcPath] = true
-			m.statsMu.Unlock()
-			m.logSync(task, "synced", srcPath, relPath)
+// resolveDirection determines the actual copy direction based on SyncDirection.
+//   - one_way_upload:   source is master -> always copy src -> dst
+//   - one_way_download: target is master -> always copy dst -> src
+//   - two_way:          copy whichever side is newer
+//
+// It returns (from, to, shouldSync, error).
+func (m *Manager) resolveDirection(task *configdb.SyncTask, srcPath, dstPath string) (string, string, bool, error) {
+	switch task.SyncDirection {
+	case "one_way_download":
+		if _, err := os.Stat(dstPath); err != nil {
+			return "", "", false, fmt.Errorf("failed to stat target %s: %v", dstPath, err)
 		}
+		return dstPath, srcPath, true, nil
+
+	case "two_way":
+		srcInfo, err := os.Stat(srcPath)
+		if os.IsNotExist(err) {
+			if _, e := os.Stat(dstPath); e == nil {
+				return dstPath, srcPath, true, nil
+			}
+			return "", "", false, nil
+		} else if err != nil {
+			return "", "", false, err
+		}
+		dstInfo, err := os.Stat(dstPath)
+		if os.IsNotExist(err) {
+			return srcPath, dstPath, true, nil
+		} else if err != nil {
+			return "", "", false, err
+		}
+		if srcInfo.ModTime().After(dstInfo.ModTime()) {
+			return srcPath, dstPath, true, nil
+		}
+		if dstInfo.ModTime().After(srcInfo.ModTime()) {
+			return dstPath, srcPath, true, nil
+		}
+		return "", "", false, nil // identical
+
+	default: // one_way_upload
+		if _, err := os.Stat(srcPath); err != nil {
+			return "", "", false, fmt.Errorf("failed to stat source %s: %v", srcPath, err)
+		}
+		return srcPath, dstPath, true, nil
 	}
 }
 
-func (m *Manager) logSync(task *configdb.SyncTask, status, filePath, message string) {
-	if err := m.db.LogSync(task.ID, task.Name, "sync", filePath, status, message); err != nil {
+// onSyncResult is invoked by the worker pool for every processed job.
+func (m *Manager) onSyncResult(task syncer.SyncTask, size int64, err error) {
+	if err != nil {
+		m.logSync(task.TaskID, task.TaskName, "failed", task.SrcPath,
+			fmt.Sprintf("Failed to sync %s: %v", task.RelPath, err))
+		return
+	}
+	m.statsMu.Lock()
+	m.syncedFiles[task.SrcPath] = true
+	m.statsMu.Unlock()
+	m.logSync(task.TaskID, task.TaskName, "synced", task.SrcPath, task.RelPath)
+}
+
+func (m *Manager) logSync(taskID int64, taskName, status, filePath, message string) {
+	if err := m.db.LogSync(taskID, taskName, "sync", filePath, status, message); err != nil {
 		log.Printf("Failed to log sync: %v", err)
 	}
-}
-
-func copyFile(src, dst string) error {
-	// Read source file
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	// Get source file info
-	srcInfo, err := srcFile.Stat()
-	if err != nil {
-		return err
-	}
-
-	// Create target file
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
-
-	// Copy content
-	buf := make([]byte, 64*1024)
-	for {
-		n, err := srcFile.Read(buf)
-		if n > 0 {
-			if _, writeErr := dstFile.Write(buf[:n]); writeErr != nil {
-				return writeErr
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
-
-	// Preserve timestamps
-	return os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
 }
