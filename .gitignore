@@ -1,0 +1,41 @@
+# ---------- Go ----------
+# 编译产物（跨平台二进制）
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# go-winres 生成的临时资源文件（build.ps1 编译后自动删除）
+*.syso
+
+# ---------- 前端 (frontend/) ----------
+# 依赖目录
+frontend/node_modules/
+
+# Vite 构建产物
+frontend/dist/
+
+# ---------- 构建输出 ----------
+# build.ps1 的输出目录（exe / zip）
+build/bin/
+build/*.zip
+
+# ---------- IDE / 编辑器 ----------
+.idea/
+.vscode/
+*.swp
+
+# ---------- 工具 / 本地文件 ----------
+# AtomCode 本地会话数据
+.atomcode/
+
+# 临时 commit message 文件（由 AI 助手生成，用户自行提交）
+COMMIT.md
+
+# 操作系统杂项
+Thumbs.db
+Desktop.ini
+.DS_Store

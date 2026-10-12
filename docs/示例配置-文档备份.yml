@@ -1,0 +1,48 @@
+# ===================== FileSync 任务配置 =====================
+# name    : 任务名称（显示在任务列表）
+# enabled : false 时该任务不参与手动与定时同步
+
+name: "文档备份"
+enabled: true
+
+# -----------------------------------------------------------
+# left  : 左侧文件夹（one-way 模式下作为源）
+# right : 右侧文件夹（one-way 模式下作为目标）
+# mode  : one-way = 左→右 | one-way-back = 右→左 | two-way = 双向保持一致
+left: "C:\\Users\\me\\Documents"
+right: "D:\\Archive\\Documents"
+mode: one-way
+
+# -----------------------------------------------------------
+# incremental    : true 时仅同步有变化的文件（大小+修改时间比对），提高效率
+# mirror         : 单向模式下，源端已删除的文件在目标端同步删除
+# conflict       : 双向模式冲突策略：newer 较新者胜 | left 以左为准 | right 以右为准 | skip 跳过
+# backup_deleted : 删除或覆盖前备份到目标目录的 .filesync-trash/
+incremental: true
+mirror: false
+conflict: newer
+backup_deleted: true
+
+# -----------------------------------------------------------
+# 过滤规则：glob 通配（* 任意字符 ? 单字符 ** 跨目录）
+# exclude: 排除项；include: 非空时仅同步匹配项
+filters:
+  exclude:
+    - "*.tmp"
+    - "Thumbs.db"
+    - "desktop.ini"
+    - "node_modules/"
+    - "~$*"
+  include: []
+  case_sensitive: false
+
+# -----------------------------------------------------------
+# 定时同步：type = interval（每 N 分钟）| daily（每天 HH:MM）
+schedule:
+  enabled: true
+  type: interval
+  interval_minutes: 60
+  daily_time: "02:00"
+
+created: "2026-10-11T23:10:00+08:00"
+updated: "2026-10-11T23:10:00+08:00"

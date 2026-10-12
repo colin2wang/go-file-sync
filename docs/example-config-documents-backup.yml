@@ -1,0 +1,48 @@
+# ===================== FileSync Task Config =====================
+# name    : task name (shown in the task list)
+# enabled : when false, the task is excluded from manual and scheduled syncs
+
+name: "Documents Backup"
+enabled: true
+
+# -----------------------------------------------------------
+# left  : left folder (acts as the source in one-way mode)
+# right : right folder (acts as the target in one-way mode)
+# mode  : one-way = left→right | one-way-back = right→left | two-way = keep both sides identical
+left: "C:\\Users\\me\\Documents"
+right: "D:\\Archive\\Documents"
+mode: one-way
+
+# -----------------------------------------------------------
+# incremental    : when true, only changed files are synced (compared by size + mtime) for efficiency
+# mirror         : in one-way mode, files deleted on the source are also deleted on the target
+# conflict       : two-way conflict policy: newer = newest wins | left = left wins | right = right wins | skip = skip
+# backup_deleted : back up to the target's .filesync-trash/ before deleting or overwriting
+incremental: true
+mirror: false
+conflict: newer
+backup_deleted: true
+
+# -----------------------------------------------------------
+# Filter rules: glob wildcards (* any chars, ? single char, ** across directories)
+# exclude: exclusions; include: when non-empty, only matching files are synced
+filters:
+  exclude:
+    - "*.tmp"
+    - "Thumbs.db"
+    - "desktop.ini"
+    - "node_modules/"
+    - "~$*"
+  include: []
+  case_sensitive: false
+
+# -----------------------------------------------------------
+# Scheduled sync: type = interval (every N minutes) | daily (every day at HH:MM)
+schedule:
+  enabled: true
+  type: interval
+  interval_minutes: 60
+  daily_time: "02:00"
+
+created: "2026-10-11T23:10:00+08:00"
+updated: "2026-10-11T23:10:00+08:00"
